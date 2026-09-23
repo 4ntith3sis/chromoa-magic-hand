@@ -1,0 +1,8 @@
+Put your full-size spells drawings in this folder (PNG, any size).
+
+Then run:  npm run compress spells
+
+That resizes to 256px, converts to WebP, writes into public/art/spells/,
+and regenerates the manifest automatically.
+
+Do not edit public/art/spells/ by hand — it gets overwritten.

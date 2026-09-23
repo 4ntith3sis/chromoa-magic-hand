@@ -1,0 +1,18 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cat head silhouette -->
+  <path d="M128 192 L96 80 L176 144 C200 120 232 120 256 144 C280 120 312 120 336 144 L416 80 L384 192 C432 224 464 280 464 352 C464 424 408 480 336 480 H176 C104 480 48 424 48 352 C48 280 80 224 128 192 Z" fill="#a0a0a0"/>
+  <!-- Face details -->
+  <circle cx="168" cy="272" r="32" fill="#0b0f0c"/>
+  <circle cx="344" cy="272" r="32" fill="#0b0f0c"/>
+  <circle cx="176" cy="264" r="12" fill="#fff8e7"/>
+  <circle cx="352" cy="264" r="12" fill="#fff8e7"/>
+  <ellipse cx="256" cy="340" rx="24" ry="16" fill="#f0b4c4"/>
+  <path d="M236 356 Q256 380 276 356" stroke="#0b0f0c" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <!-- Whiskers — black -->
+  <line x1="80" y1="320" x2="140" y2="330" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+  <line x1="80" y1="352" x2="140" y2="352" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+  <line x1="80" y1="384" x2="140" y2="374" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+  <line x1="372" y1="330" x2="432" y2="320" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+  <line x1="372" y1="352" x2="432" y2="352" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+  <line x1="372" y1="374" x2="432" y2="384" stroke="#0b0f0c" stroke-width="3" stroke-linecap="round"/>
+</svg>
