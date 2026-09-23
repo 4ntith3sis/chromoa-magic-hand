@@ -80,7 +80,7 @@ const DRAWING_TOOLS: ToolKey[] = [PEN_TOOL];
 export default function WandStage() {
   const pathname = usePathname();
   const initialTheme = themeFromPath(pathname);
-  const initialTool = pathname === "/pen" ? PEN_TOOL : ((THEME_LIST.find((t) => t.path === pathname)?.key ?? "flowers") as ToolKey);
+  const initialTool = pathname === "/pen" || pathname === "/" || !pathname ? PEN_TOOL : ((THEME_LIST.find((t) => t.path === pathname)?.key ?? PEN_TOOL) as ToolKey);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -125,6 +125,11 @@ export default function WandStage() {
   const catAudioRef = useRef<HTMLAudioElement>(null);
   const catOverlayRef = useRef<HTMLDivElement>(null);
 
+  // Camera visibility lifecycle refs
+  const cameraWasActiveBeforeHiddenRef = useRef(false);
+  const manuallyStoppedRef = useRef(false);
+  const runningRef = useRef(false);
+
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -141,6 +146,22 @@ export default function WandStage() {
 
   skeletonRef.current = showSkeleton;
   activeToolRef.current = activeTool;
+  runningRef.current = running;
+
+  const stopCameraStream = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    const video = videoRef.current;
+    if (video) {
+      const stream = video.srcObject as MediaStream | null;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        video.srcObject = null;
+      }
+    }
+  }, []);
 
   /** Normalized landmark -> mirrored, object-fit:cover screen coords. */
   const toScreen = useCallback((nx: number, ny: number): Point => {
@@ -165,11 +186,7 @@ export default function WandStage() {
   }, []);
 
   const openCamera = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const old = video.srcObject as MediaStream | null;
-    old?.getTracks().forEach((t) => t.stop());
+    stopCameraStream();
 
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -179,9 +196,12 @@ export default function WandStage() {
       audio: false,
     });
 
-    video.srcObject = stream;
-    await video.play();
-  }, []);
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = stream;
+      await video.play();
+    }
+  }, [stopCameraStream]);
 
   const updateFit = useCallback(() => {
     const video = videoRef.current;
@@ -240,24 +260,16 @@ export default function WandStage() {
 
       if (DRAWING_TOOLS.includes(activeToolRef.current)) {
         // ---- Pen Tool loop ----
-        let penDetected = false;
-        hands.forEach((lm, i) => {
-          if (i > 1) return;
-          const indexUp = isIndexUp(lm);
-          const raw = toScreen(lm[INDEX_TIP].x, lm[INDEX_TIP].y);
-          // Debug log every ~500ms
+        const pointingHand = hands.find((lm) => isIndexUp(lm));
+        if (pointingHand) {
+          const raw = toScreen(pointingHand[INDEX_TIP].x, pointingHand[INDEX_TIP].y);
           if (t % 500 < 17) {
             console.log(
               `[PenDebug] tool=${activeToolRef.current} hands=${hands.length} ` +
-              `indexUp=${indexUp} sx=${raw.x.toFixed(0)} sy=${raw.y.toFixed(0)} ` +
-              `strokes=${penRef.current["strokes"]?.length ?? 0} idx=${penRef.current["currentStrokeIdx"] ?? -1} pts=${(penRef.current["strokes"] as any[])?.[penRef.current["currentStrokeIdx"] as number]?.points?.length ?? 0}`
+              `sx=${raw.x.toFixed(0)} sy=${raw.y.toFixed(0)} ` +
+              `strokes=${penRef.current["strokes"]?.length ?? 0} idx=${penRef.current["currentStrokeIdx"] ?? -1}`
             );
           }
-          if (!indexUp) {
-            penRef.current.finishStroke(t);
-            return;
-          }
-          penDetected = true;
           penRef.current.addPoint(raw.x, raw.y, t, th.accent);
           // Draw landmark position on canvas
           ctx.save();
@@ -266,14 +278,15 @@ export default function WandStage() {
           ctx.fillStyle = "#0ff";
           ctx.fill();
           ctx.restore();
-        });
-        // DEBUG: show detection status text
-        if (!penDetected && hands.length > 0) {
-          ctx.save();
-          ctx.font = "bold 11px monospace";
-          ctx.fillStyle = "#f00";
-          ctx.fillText("NO INDEX UP", 8, 50);
-          ctx.restore();
+        } else {
+          penRef.current.finishStroke(t);
+          if (hands.length > 0) {
+            ctx.save();
+            ctx.font = "bold 11px monospace";
+            ctx.fillStyle = "#f00";
+            ctx.fillText("NO INDEX UP", 8, 50);
+            ctx.restore();
+          }
         }
       } else if (activeToolRef.current === CAT_TOOL) {
         // ---- Cat Tool: ANY hand movement/shake drives video + particles ----
@@ -686,6 +699,13 @@ export default function WandStage() {
 
   const start = useCallback(async () => {
     setError("");
+    manuallyStoppedRef.current = false;
+    cameraWasActiveBeforeHiddenRef.current = false;
+
+    // Ensure Pen Tool is default active tool on start unless on a specific tool route
+    const targetTool = (pathname === "/" || !pathname) ? PEN_TOOL : initialTool;
+    switchTool(targetTool);
+
     try {
       setStatus("Loading art...");
       const th = themeRef.current;
@@ -712,6 +732,7 @@ export default function WandStage() {
       setStatus("");
       resizeCanvas();
       updateFit();
+      cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(loop);
     } catch (err) {
       setRunning(false);
@@ -724,16 +745,16 @@ export default function WandStage() {
             : "Something went wrong."
       );
     }
-  }, [loop, openCamera, resizeCanvas, updateFit]);
+  }, [initialTool, loop, openCamera, pathname, resizeCanvas, switchTool, updateFit]);
 
   /** Stop everything and return to the start screen. */
   const restart = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
+    manuallyStoppedRef.current = true;
+    cameraWasActiveBeforeHiddenRef.current = false;
+    stopCameraStream();
     landmarkerRef.current?.close();
     catRef.current.stop();
     penRef.current.clear();
-    const stream = videoRef.current?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((t) => t.stop());
     setRunning(false);
     setActiveTool(initialTool);
     setError("");
@@ -747,7 +768,7 @@ export default function WandStage() {
     dwellRef.current = null;
     tracerRef.current.clear();
     resetBag();
-  }, [initialTool]);
+  }, [initialTool, stopCameraStream]);
 
   const withSkeletonHidden = useCallback(
     async <T,>(fn: () => Promise<T>): Promise<T> => {
@@ -802,6 +823,32 @@ export default function WandStage() {
   }, [showSkeleton]);
 
   useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "hidden") {
+        if (runningRef.current && !manuallyStoppedRef.current) {
+          cameraWasActiveBeforeHiddenRef.current = true;
+          stopCameraStream();
+        }
+      } else if (document.visibilityState === "visible") {
+        if (cameraWasActiveBeforeHiddenRef.current && !manuallyStoppedRef.current) {
+          cameraWasActiveBeforeHiddenRef.current = false;
+          try {
+            stopCameraStream();
+            await openCamera();
+            updateFit();
+            if (runningRef.current) {
+              cancelAnimationFrame(rafRef.current);
+              rafRef.current = requestAnimationFrame(loop);
+            }
+          } catch (err) {
+            console.error("Failed to restore camera stream on visibility change:", err);
+          }
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "s") setShowSkeleton((v) => !v);
     };
@@ -823,16 +870,16 @@ export default function WandStage() {
     window.addEventListener("orientationchange", onResize);
     window.addEventListener("keydown", onKey);
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
       window.removeEventListener("keydown", onKey);
       cancelAnimationFrame(rafRef.current);
       landmarkerRef.current?.close();
       catRef.current.stop();
-      const stream = videoRef.current?.srcObject as MediaStream | null;
-      stream?.getTracks().forEach((t) => t.stop());
+      stopCameraStream();
     };
-  }, [openCamera, resizeCanvas, updateFit]);
+  }, [loop, openCamera, resizeCanvas, stopCameraStream, updateFit]);
 
   const mmss = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(
     elapsed % 60

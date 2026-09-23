@@ -42,8 +42,10 @@ export class PenEngine {
   private frameCount = 0;
   /** Index of the stroke currently being drawn (stays open while pointing). */
   private currentStrokeIdx = -1;
-  /** Timestamp when index was last detected as up — used for grace period. */
+  /** Timestamp when index was last detected as up. */
   private lastDetectedAt = 0;
+  /** Timestamp when finger actually moved and added a new point. */
+  private lastMoveTime = 0;
 
   get active() {
     return this.strokes.length > 0 || this.sparks.length > 0;
@@ -56,6 +58,7 @@ export class PenEngine {
     }
     const pt: Point = { x, y };
     this.lastDetectedAt = t;
+
     if (this.lastPoint) {
       const dist = Math.hypot(pt.x - this.lastPoint.x, pt.y - this.lastPoint.y);
       // Only skip if point is very close (sub-pixel jitter).
@@ -69,7 +72,7 @@ export class PenEngine {
           const f = i / steps;
           const ix = this.lastPoint.x + (pt.x - this.lastPoint.x) * f;
           const iy = this.lastPoint.y + (pt.y - this.lastPoint.y) * f;
-          this._pushToCurrentStroke({ x: ix, y: iy }, color);
+          this._pushToCurrentStroke({ x: ix, y: iy }, color, t);
         }
       }
     }
@@ -84,7 +87,8 @@ export class PenEngine {
     }
     this.prevPos = pt;
 
-    this._pushToCurrentStroke(pt, color);
+    this.lastMoveTime = t;
+    this._pushToCurrentStroke(pt, color, t);
     this.lastPoint = pt;
 
     // Spawn sparks on fast movement.
@@ -107,7 +111,7 @@ export class PenEngine {
   }
 
   /** Append a point to the current active stroke, or start a new one. */
-  private _pushToCurrentStroke(pt: Point, color: string) {
+  private _pushToCurrentStroke(pt: Point, color: string, t: number) {
     if (this.currentStrokeIdx >= 0 && this.currentStrokeIdx < this.strokes.length) {
       const seg = this.strokes[this.currentStrokeIdx];
       // Reset finishedAt if previously marked finish
@@ -116,7 +120,7 @@ export class PenEngine {
       seg.color = color;
       if (seg.points.length > 800) seg.points.shift();
     } else {
-      const born = this.lastDetectedAt > 0 ? this.lastDetectedAt : performance.now();
+      const born = t > 0 ? t : performance.now();
       this.strokes.push({ points: [pt], born, color });
       this.currentStrokeIdx = this.strokes.length - 1;
     }
@@ -145,6 +149,7 @@ export class PenEngine {
     this.frameCount = 0;
     this.currentStrokeIdx = -1;
     this.lastDetectedAt = 0;
+    this.lastMoveTime = 0;
   }
 
   draw(ctx: CanvasRenderingContext2D, t: number) {
@@ -164,13 +169,20 @@ export class PenEngine {
 
     // Auto-finish active stroke if movement has stopped for FADE_DELAY_MS
     if (this.currentStrokeIdx >= 0 && this.currentStrokeIdx < this.strokes.length) {
-      if (t - this.lastDetectedAt > FADE_DELAY_MS) {
+      if (t - this.lastMoveTime > FADE_DELAY_MS) {
         const seg = this.strokes[this.currentStrokeIdx];
         if (!seg.finishedAt) {
           seg.finishedAt = t;
         }
         this.currentStrokeIdx = -1;
-        this.lastPoint = null;
+        // Keep lastPoint recorded so stationary finger doesn't re-trigger a new stroke
+      }
+    }
+
+    // Fail-safe: ensure any non-active stroke has a finishedAt timestamp set
+    for (let i = 0; i < this.strokes.length; i++) {
+      if (i !== this.currentStrokeIdx && !this.strokes[i].finishedAt) {
+        this.strokes[i].finishedAt = t;
       }
     }
 
